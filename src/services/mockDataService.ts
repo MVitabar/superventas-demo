@@ -1,7 +1,7 @@
 // Mock Data Service for SuperVentas Demo
 // Generates realistic test data for all entities
 
-import { faker } from '@faker-js/faker';
+import { fakerES as faker } from '@faker-js/faker';
 import type {
     Empresa,
     Usuario,
@@ -18,6 +18,26 @@ import type {
     CreateEmpresa,
 } from '@/types';
 import type { Caja } from '@/types/caja.interface';
+
+// Helper to generate SVG placeholder
+const generatePlaceholderImage = (text: string, bgColor: string = '0088FE', textColor: string = 'FFFFFF'): string => {
+    const svg = `
+  <svg width="300" height="300" xmlns="http://www.w3.org/2000/svg">
+    <rect width="100%" height="100%" fill="#${bgColor}"/>
+    <text x="50%" y="50%" font-family="Arial" font-size="24" fill="#${textColor}" text-anchor="middle" dy=".3em">${text}</text>
+  </svg>`;
+    return `data:image/svg+xml;base64,${btoa(svg)}`;
+};
+
+// Helper to generate SVG avatar
+const generateAvatarImage = (initials: string, bgColor: string = 'FF5722'): string => {
+    const svg = `
+    <svg width="150" height="150" xmlns="http://www.w3.org/2000/svg">
+        <rect width="100%" height="100%" fill="#${bgColor}"/>
+        <text x="50%" y="50%" font-family="Arial" font-size="60" fill="white" text-anchor="middle" dy=".3em">${initials}</text>
+    </svg>`;
+    return `data:image/svg+xml;base64,${btoa(svg)}`;
+};
 
 // Faker is already configured with default locale
 // Note: In newer versions of Faker, locale is set differently
@@ -82,6 +102,50 @@ const MARCAS = [
     'Bimbo', 'Diana', 'Marinela',
 ];
 
+// Imágenes de Unsplash por categoría
+const UNSPLASH_IMAGES: Record<string, string[]> = {
+    'Electrónica': [
+        'https://images.unsplash.com/photo-1496181133206-80ce9b88a853?auto=format&fit=crop&w=300&q=80',
+        'https://images.unsplash.com/photo-1550009158-9ebf69173e03?auto=format&fit=crop&w=300&q=80',
+        'https://images.unsplash.com/photo-1527443224154-c4a3942d3acf?auto=format&fit=crop&w=300&q=80',
+    ],
+    'Ropa': [
+        'https://images.unsplash.com/photo-1523381210434-271e8be1f52b?auto=format&fit=crop&w=300&q=80',
+        'https://images.unsplash.com/photo-1576566588028-4147f3842f27?auto=format&fit=crop&w=300&q=80',
+        'https://images.unsplash.com/photo-1434389677669-e08b4cac3105?auto=format&fit=crop&w=300&q=80',
+    ],
+    'Alimentos': [
+        'https://images.unsplash.com/photo-1506354666786-959d6d497f1a?auto=format&fit=crop&w=300&q=80',
+        'https://images.unsplash.com/photo-1512621776951-a57141f2eefd?auto=format&fit=crop&w=300&q=80',
+        'https://images.unsplash.com/photo-1606787366850-de6330128bfc?auto=format&fit=crop&w=300&q=80',
+    ],
+    'Bebidas': [
+        'https://images.unsplash.com/photo-1543599538-a6c4f6cc5c05?auto=format&fit=crop&w=300&q=80',
+        'https://images.unsplash.com/photo-1622483767028-3f66f32aef97?auto=format&fit=crop&w=300&q=80',
+        'https://images.unsplash.com/photo-1513558161293-cdaf765ed2fd?auto=format&fit=crop&w=300&q=80',
+    ],
+    'Hogar': [
+        'https://images.unsplash.com/photo-1583847661884-38e53864171c?auto=format&fit=crop&w=300&q=80',
+        'https://images.unsplash.com/photo-1556228453-efd6c1ff04f6?auto=format&fit=crop&w=300&q=80',
+        'https://images.unsplash.com/photo-1513694203232-719a280e022f?auto=format&fit=crop&w=300&q=80',
+    ],
+    'Deportes': [
+        'https://images.unsplash.com/photo-1517649763962-0c623066013b?auto=format&fit=crop&w=300&q=80',
+        'https://images.unsplash.com/photo-1526628953301-3e589a6a8b74?auto=format&fit=crop&w=300&q=80',
+        'https://images.unsplash.com/photo-1579952363873-27f3bade9f55?auto=format&fit=crop&w=300&q=80',
+    ],
+    'Juguetes': [
+        'https://images.unsplash.com/photo-1566576912902-4b610d78494b?auto=format&fit=crop&w=300&q=80',
+        'https://images.unsplash.com/photo-1558060370-d644479cb6f7?auto=format&fit=crop&w=300&q=80',
+        'https://images.unsplash.com/photo-1596461404969-9ae70f2830c1?auto=format&fit=crop&w=300&q=80',
+    ],
+    'Libros': [
+        'https://images.unsplash.com/photo-1544947950-fa07a98d237f?auto=format&fit=crop&w=300&q=80',
+        'https://images.unsplash.com/photo-1512820790803-83ca734da794?auto=format&fit=crop&w=300&q=80',
+        'https://images.unsplash.com/photo-1524578271613-d550eacf6090?auto=format&fit=crop&w=300&q=80',
+    ],
+};
+
 // ============================================================================
 // HELPER FUNCTIONS
 // ============================================================================
@@ -135,7 +199,7 @@ export const mockEmpresa: Empresa = {
     email: 'info@superventas-demo.com',
     direccion: 'Zona 10, Ciudad de Guatemala',
     owner: 1, // Owner user ID
-    foto: 'https://via.placeholder.com/150/0088FE/FFFFFF?text=SV',
+    foto: generatePlaceholderImage('SV'),
 };
 
 // ============================================================================
@@ -152,7 +216,7 @@ export const mockUsuarios: Usuario[] = [
         usuario: 'owner',
         clave: DEMO_PASSWORD,
         cargo: 'Owner',
-        foto: 'https://i.pravatar.cc/150?img=12',
+        foto: generateAvatarImage('CA', '0088FE'),
         cajaId: 1,
         estado: 'activo',
         hasChangedPassword: true,
@@ -166,7 +230,7 @@ export const mockUsuarios: Usuario[] = [
         usuario: 'admin',
         clave: DEMO_PASSWORD,
         cargo: 'Administrador',
-        foto: 'https://i.pravatar.cc/150?img=5',
+        foto: generateAvatarImage('MG', 'E91E63'),
         cajaId: 1,
         estado: 'activo',
         hasChangedPassword: true,
@@ -180,7 +244,7 @@ export const mockUsuarios: Usuario[] = [
         usuario: 'cajero',
         clave: DEMO_PASSWORD,
         cargo: 'Cajero',
-        foto: 'https://i.pravatar.cc/150?img=33',
+        foto: generateAvatarImage('JP', '4CAF50'),
         cajaId: 1,
         estado: 'activo',
         hasChangedPassword: true,
@@ -194,7 +258,7 @@ export const mockUsuarios: Usuario[] = [
         usuario: 'vendedor',
         clave: DEMO_PASSWORD,
         cargo: 'Vendedor',
-        foto: 'https://i.pravatar.cc/150?img=9',
+        foto: generateAvatarImage('AM', 'FF9800'),
         cajaId: 2,
         estado: 'activo',
         hasChangedPassword: true,
@@ -248,26 +312,213 @@ export const mockCategorias: Categoria[] = CATEGORIAS_PRODUCTOS.map((cat, index)
 // PRODUCTOS
 // ============================================================================
 
+// Definición de productos con sus características completas
+interface ProductoDefinicion {
+    nombre: string;
+    categoria: string;
+    tipoUnidad: string;
+    marca: string;
+    descripcion: string;
+    precioMin: number;
+    precioMax: number;
+}
+
+// Lista de productos con sus características completas y coherentes
+const PRODUCTOS_DEFINIDOS: ProductoDefinicion[] = [
+    // Electrónica
+    {
+        nombre: 'Teléfono Inteligente',
+        categoria: 'Electrónica',
+        tipoUnidad: 'Unidad',
+        marca: 'Samsung',
+        descripcion: 'Teléfono inteligente de última generación con cámara de alta resolución',
+        precioMin: 3000,
+        precioMax: 15000
+    },
+    {
+        nombre: 'Laptop Ultradelgada',
+        categoria: 'Electrónica',
+        tipoUnidad: 'Unidad',
+        marca: 'HP',
+        descripcion: 'Laptop ligera y potente para trabajo y entretenimiento',
+        precioMin: 5000,
+        precioMax: 20000
+    },
+    {
+        nombre: 'Auriculares Inalámbricos',
+        categoria: 'Electrónica',
+        tipoUnidad: 'Par',
+        marca: 'Sony',
+        descripcion: 'Auriculares con cancelación de ruido y sonido envolvente',
+        precioMin: 800,
+        precioMax: 5000
+    },
+    
+    // Alimentos
+    {
+        nombre: 'Arroz Integral',
+        categoria: 'Alimentos',
+        tipoUnidad: 'Kilogramo',
+        marca: 'Diana',
+        descripcion: 'Arroz integral de grano largo, rico en fibra',
+        precioMin: 8,
+        precioMax: 15
+    },
+    {
+        nombre: 'Aceite de Oliva Extra Virgen',
+        categoria: 'Alimentos',
+        tipoUnidad: 'Litro',
+        marca: 'Carbonell',
+        descripcion: 'Aceite de oliva de primera prensada en frío',
+        precioMin: 40,
+        precioMax: 120
+    },
+    
+    // Bebidas
+    {
+        nombre: 'Agua Mineral',
+        categoria: 'Bebidas',
+        tipoUnidad: 'Litro',
+        marca: 'Cristal',
+        descripcion: 'Agua mineral natural de manantial',
+        precioMin: 5,
+        precioMax: 10
+    },
+    {
+        nombre: 'Café en Grano',
+        categoria: 'Bebidas',
+        tipoUnidad: 'Kilogramo',
+        marca: 'Lavazza',
+        descripcion: 'Café 100% arábica tostado recientemente',
+        precioMin: 60,
+        precioMax: 180
+    },
+    
+    // Ropa
+    {
+        nombre: 'Camiseta de Algodón',
+        categoria: 'Ropa',
+        tipoUnidad: 'Unidad',
+        marca: 'Nike',
+        descripcion: 'Camiseta de algodón 100% de alta calidad',
+        precioMin: 80,
+        precioMax: 200
+    },
+    {
+        nombre: 'Jeans Clásicos',
+        categoria: 'Ropa',
+        tipoUnidad: 'Unidad',
+        marca: 'Levi\'s',
+        descripcion: 'Jeans ajustados de tela resistente',
+        precioMin: 250,
+        precioMax: 600
+    },
+    
+    // Hogar
+    {
+        nombre: 'Juego de Sábanas',
+        categoria: 'Hogar',
+        tipoUnidad: 'Juego',
+        marca: 'Serta',
+        descripcion: 'Juego de sábanas de algodón egipcio 600 hilos',
+        precioMin: 300,
+        precioMax: 800
+    },
+    {
+        nombre: 'Juego de Ollas',
+        categoria: 'Hogar',
+        tipoUnidad: 'Juego',
+        marca: 'T-fal',
+        descripcion: 'Juego de ollas de acero inoxidable antiadherente',
+        precioMin: 500,
+        precioMax: 2000
+    },
+    
+    // Deportes
+    {
+        nombre: 'Balón de Fútbol',
+        categoria: 'Deportes',
+        tipoUnidad: 'Unidad',
+        marca: 'Adidas',
+        descripcion: 'Balón oficial de fútbol talla 5',
+        precioMin: 150,
+        precioMax: 500
+    },
+    {
+        nombre: 'Raqueta de Tenis',
+        categoria: 'Deportes',
+        tipoUnidad: 'Unidad',
+        marca: 'Wilson',
+        descripcion: 'Raqueta profesional de tenis',
+        precioMin: 400,
+        precioMax: 1500
+    },
+    
+    // Juguetes
+    {
+        nombre: 'Set de Construcción',
+        categoria: 'Juguetes',
+        tipoUnidad: 'Caja',
+        marca: 'LEGO',
+        descripcion: 'Set de construcción con 500 piezas',
+        precioMin: 200,
+        precioMax: 800
+    },
+    
+    // Libros
+    {
+        nombre: 'Novela de Aventuras',
+        categoria: 'Libros',
+        tipoUnidad: 'Unidad',
+        marca: 'Alfaguara',
+        descripcion: 'Emocionante novela de aventuras',
+        precioMin: 80,
+        precioMax: 200
+    }
+];
+
 function generateProducto(id: number): Producto {
-    const categoria = getRandomElement(mockCategorias);
-    const marca = getRandomElement(MARCAS);
-    const precioCompra = faker.number.float({ min: 10, max: 500, fractionDigits: 2 });
-    const precioVenta = precioCompra * faker.number.float({ min: 1.2, max: 2.5, fractionDigits: 2 });
+    // Seleccionar un producto aleatorio de la lista definida
+    const productoDefinido = getRandomElement(PRODUCTOS_DEFINIDOS);
+    
+    // Obtener la categoría correspondiente
+    const categoria = mockCategorias.find(c => c.nombre === productoDefinido.categoria) || mockCategorias[0];
+    
+    // Generar precios dentro del rango definido para el producto
+    const precioCompra = faker.number.float({ 
+        min: productoDefinido.precioMin, 
+        max: productoDefinido.precioMax, 
+        fractionDigits: 2 
+    });
+    
+    const precioVenta = precioCompra * faker.number.float({ 
+        min: 1.2, 
+        max: 2.0, 
+        fractionDigits: 2 
+    });
+    
+    // Generar stock según el tipo de producto
+    let stockTotal: number;
+    if (productoDefinido.categoria === 'Electrónica' || productoDefinido.precioMin > 1000) {
+        stockTotal = faker.number.int({ min: 1, max: 20 }); // Productos caros, menos stock
+    } else {
+        stockTotal = faker.number.int({ min: 5, max: 100 }); // Productos comunes, más stock
+    }
 
     return {
         id,
         empresaId: EMPRESA_ID,
         codigo: `PROD-${String(id).padStart(5, '0')}`,
-        nombre: faker.commerce.productName(),
-        descripcion: faker.commerce.productDescription(),
-        stockTotal: faker.number.int({ min: 0, max: 200 }),
-        tipoUnidad: getRandomElement(['Unidad', 'Caja', 'Paquete', 'Litro', 'Kilogramo']),
+        nombre: productoDefinido.nombre,
+        descripcion: productoDefinido.descripcion,
+        stockTotal,
+        tipoUnidad: productoDefinido.tipoUnidad,
         precioCompra: precioCompra.toFixed(2),
         precioVenta: precioVenta.toFixed(2),
-        marca,
-        modelo: `${marca}-${faker.string.alphanumeric(4).toUpperCase()}`,
+        marca: productoDefinido.marca,
+        modelo: `${productoDefinido.marca}-${faker.string.alphanumeric(4).toUpperCase()}`,
         estado: 'activo',
-        foto: `https://via.placeholder.com/300/0088FE/FFFFFF?text=${categoria.nombre}`,
+        foto: getRandomElement(UNSPLASH_IMAGES[categoria.nombre] || []) || generatePlaceholderImage(categoria.nombre),
         categoriaId: categoria.id,
         createdAt: formatDateTime(getRandomDate(180)),
         updatedAt: formatDateTime(new Date()),

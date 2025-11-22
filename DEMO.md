@@ -76,16 +76,10 @@ El modo demo incluye los siguientes datos de prueba:
 ## Funcionalidades del Modo Demo
 
 ### Banner de Demo
-Cuando el modo demo está activo, aparece un banner naranja en la parte superior de la aplicación que indica:
-- "Modo Demo - Datos de Prueba"
-- Credenciales de acceso rápido
-- Botón para resetear datos
+El componente `DemoBanner` está disponible en `src/components/layout/DemoBanner.tsx` pero no se muestra por defecto en el layout principal. Puede activarse descomentándolo en `Layout.tsx`.
 
 ### Resetear Datos
-El botón "Resetear Datos" en el banner permite:
-- Restaurar todos los datos a su estado inicial
-- Útil después de hacer pruebas o modificaciones
-- Recarga automáticamente la aplicación
+Para resetear los datos (ya que el banner está oculto), se puede recargar la página (F5), lo cual reiniciará el estado en memoria.
 
 ### Operaciones CRUD
 Todas las operaciones funcionan normalmente:
@@ -94,7 +88,7 @@ Todas las operaciones funcionan normalmente:
 - ✅ Actualizar registros
 - ✅ Eliminar registros (soft delete)
 
-**Nota**: Los cambios se mantienen en memoria durante la sesión actual. Al recargar la página o resetear, los datos vuelven a su estado inicial.
+**Nota**: Los cambios se mantienen en memoria durante la sesión actual. Al recargar la página, los datos vuelven a su estado inicial.
 
 ## Limitaciones del Modo Demo
 
@@ -104,7 +98,7 @@ Todas las operaciones funcionan normalmente:
 
 3. **Autenticación Simulada**: El login es simulado. Cualquier combinación de las credenciales demo funcionará.
 
-4. **Imágenes**: Las imágenes de productos y usuarios son placeholders de servicios externos.
+4. **Imágenes**: Las imágenes de productos y usuarios se generan localmente (SVG) para funcionar sin internet.
 
 5. **Reportes**: Los reportes se generan con los datos mock, pero no se envían a ningún servidor.
 
