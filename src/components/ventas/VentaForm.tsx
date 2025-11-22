@@ -1,0 +1,1896 @@
+import React, { useState, useEffect, useCallback } from "react";
+import { cn } from "@/lib/utils";
+import { useNavigate, useLocation } from "react-router-dom";
+import {
+  Search,
+  X,
+  Plus,
+  Minus,
+  ShoppingCart,
+  Filter,
+  ChevronDown,
+  Clock,
+  ListOrdered,
+} from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { useToast } from "@/hooks/use-toast";
+import { getAllProductos, getProductoById, updateProducto } from "@/services/productoService";
+import { getAllCategorias } from "@/services/categoriaService";
+import { getAllClientes } from "@/services/clienteService";
+import { getVentas, createVenta, updateVenta } from "@/services/ventaService";
+import {
+  getVentaPendienteById,
+  getVentaPendienteByCodigo,
+  createVentaPendiente,
+  updateVentaPendiente,
+  deleteVentaPendiente,
+  convertirAVentaPendiente,
+  getVentasPendientes,
+  actualizarYFinalizarVenta
+} from "@/services/ventaPendienteService";
+import { createVentaDetalle } from "@/services/ventaDetalleService";
+import { ApiService } from "@/services/api.service";
+import { useAuth } from "@/hooks/useAuth";
+import { formatCurrency } from "@/data/mockData";
+import { format } from 'date-fns';
+
+// Import types from @/types
+import type {
+  ProductoVentaPendiente,
+  VentaPendiente as ApiVentaPendiente,
+  VentaDetalle,
+  Producto,
+  Categoria,
+  Cliente,
+  CreateVentaPendiente,
+  CreateVentaDetalle
+} from "@/types";
+
+// Constante para el ID de cliente cuando no hay cliente seleccionado
+const CLIENTE_SIN_REGISTRAR_ID = 0;
+import { Checkbox } from "@/components/ui/checkbox";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "../ui/select";
+import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+  SheetTrigger,
+} from "@/components/ui/sheet";
+import { DeleteDialog } from "@/components/dialogs/DeleteDialog";
+import { ScrollArea } from "@/components/ui/scroll-area";
+
+// Alias local para el tipo de producto en la venta
+type ProductoVenta = Omit<VentaDetalle, 'createdAt' | 'updatedAt' | 'deletedAt'> & {
+  producto?: Producto | null;
+  nombre?: string;
+  precioVenta: string | number;
+  total: string | number;
+  precioCompra: string | number;
+  // Make these fields optional for frontend convenience
+  empresaId?: number;
+  ventaCodigo?: string;
+};
+
+interface DetalleVenta {
+  id?: number;
+  cantidad: number;
+  precioVenta: string;
+  precioCompra: string;
+  total: string;
+  descripcion: string;
+  productoId: number;
+  empresaId: number;
+  ventaId?: number;
+  venta_codigo?: string; // Código de la venta a la que pertenece el detalle
+  createdAt?: string;
+  updatedAt?: string;
+  deletedAt?: string | null;
+  producto?: Producto;
+}
+
+interface VentaPendiente {
+  id: number;
+  clienteId: number | null; // Permitir null para cuando no hay cliente
+  clienteName: string;
+  cliente_name: string;
+  productos: ProductoVentaPendiente[];
+  detalles?: DetalleVenta[]; // Add detalles property
+  total: string;
+  estado: "pendiente" | "completada";
+  fecha: string;
+  hora?: string;
+  usuarioId: number;
+  empresaId: number;
+  nombreVendedor: string;
+  // Propiedad opcional para la UI
+  producto?: Producto | null;
+  // Campos adicionales para el backend
+  pagado?: string;
+  cambio?: string;
+  cajaId?: number;
+  codigo?: string;
+  // Campos adicionales para manejo de fechas
+  createdAt?: string;
+  updatedAt?: string;
+  deletedAt?: string | null;
+}
+
+interface ProductoVentaResponse {
+  id?: number;
+  productoId?: number;
+  nombre?: string;
+  cantidad?: number;
+  precioVenta?: string | number;
+  total?: string | number;
+  descripcion?: string;
+  producto?: Producto | null;
+}
+
+interface VentaPendienteResponse {
+  id: number;
+  clienteId: number;
+  clienteName?: string;
+  cliente_name?: string;
+  productos: unknown[] | string;
+  total: string | number;
+  estado: string;
+  fecha?: string;
+  usuarioId?: number;
+  empresaId?: number;
+  nombreVendedor?: string;
+}
+
+type ProductoSeleccionado = {
+  producto: Producto;
+  cantidad: number;
+  precio: string;
+};
+
+type VentaEstado = "pendiente" | "vendido";
+
+interface VentaFormProps {
+  ventaId?: string;
+}
+
+// Usamos la interfaz VentaPendiente importada de @/types
+
+export const VentaForm = () => {
+  // Función para formatear la hora en formato 'HH:MM:SS' (24 horas)
+  const formatTime = (date: Date) => {
+    const hours = date.getHours().toString().padStart(2, '0');
+    const minutes = date.getMinutes().toString().padStart(2, '0');
+    const seconds = date.getSeconds().toString().padStart(2, '0');
+    return `${hours}:${minutes}:${seconds}`;
+  };
+  const { toast } = useToast();
+  const { currentUser, empresaId: empresaIdFromAuth } = useAuth();
+  const navigate = useNavigate();
+
+  // Add fallback for empresaId and log its value
+  const empresaId = empresaIdFromAuth || 1; // Default to 1 if not available
+  console.log('Current empresaId:', empresaId);
+  const location = useLocation(); // Get location object
+
+  const [productos, setProductos] = useState<Producto[]>([]);
+  const [categorias, setCategorias] = useState<Categoria[]>([]); // Initialize with empty array
+  const [clientes, setClientes] = useState<Cliente[]>([]);
+  interface Caja {
+    id: number;
+    nombre: string;
+    numero: number;
+    // Add other properties as needed
+  }
+  const [cajas, setCajas] = useState<Caja[]>([]);
+  const [selectedCajaId, setSelectedCajaId] = useState<number | null>(null);
+  const [searchTerm, setSearchTerm] = useState("");
+  const [selectedCategorias, setSelectedCategorias] = useState<number[]>([]);
+  const [selectedCliente, setSelectedCliente] = useState<Cliente | null>(null);
+  const [selectedName, setSelectedName] = useState<string>("");
+  const [productosSeleccionados, setProductosSeleccionados] = useState<
+    ProductoSeleccionado[]
+  >([]);
+  const [pago, setPago] = useState(0);
+  const [loading, setLoading] = useState(false);
+  const [open, setOpen] = useState(false); // State for category filter popover
+  const [ventasPendientes, setVentasPendientes] = useState<VentaPendiente[]>(
+    []
+  );
+  const [loadingVentasPendientes, setLoadingVentasPendientes] =
+    useState<boolean>(false);
+  const [editingPendingSaleId, setEditingPendingSaleId] = useState<
+    number | null
+  >(null);
+  const [saleToDelete, setSaleToDelete] = useState<number | null>(null); // State for delete dialog
+
+  // Cargar datos iniciales (productos, categorias, clientes)
+  useEffect(() => {
+    const loadData = async () => {
+      try {
+        if (!empresaId) return; // Don't proceed if empresaId is not available
+
+        setLoading(true);
+        const [productosData, categoriasData, clientesData] = await Promise.all(
+          [
+            getAllProductos(empresaId),
+            getAllCategorias(empresaId),
+            getAllClientes(empresaId),
+          ]
+        );
+        setProductos(productosData);
+        setCategorias(categoriasData);
+        setClientes(clientesData);
+      } catch (error) {
+        toast({
+          title: "Error",
+          description: "No se pudieron cargar los datos iniciales",
+          variant: "destructive",
+        });
+      } finally {
+        setLoading(false);
+      }
+    };
+    loadData();
+  }, [toast, empresaId]); // Added empresaId to dependency array
+
+  // Cargar cajas disponibles y seleccionar la caja del usuario
+  useEffect(() => {
+    const fetchCajas = async () => {
+      try {
+        const cajasData = await import("@/services/cajaService").then((mod) =>
+          mod.getAllCajas(empresaId)
+        );
+        setCajas(cajasData);
+
+        // Si el usuario tiene una caja asignada, seleccionarla automáticamente
+        if (currentUser?.cajaId) {
+          // Verificar si la caja del usuario existe en las cajas cargadas
+          const userCaja = cajasData.find(caja => caja.id === currentUser.cajaId);
+          if (userCaja) {
+            setSelectedCajaId(currentUser.cajaId);
+            console.log('Caja del usuario seleccionada automáticamente:', userCaja);
+          } else {
+            console.warn('La caja asignada al usuario no existe en las cajas disponibles');
+          }
+        }
+      } catch (error) {
+        toast({
+          title: "Error",
+          description: "No se pudieron cargar las cajas",
+          variant: "destructive",
+        });
+      }
+    };
+
+    fetchCajas();
+  }, [empresaId, toast, currentUser?.cajaId]);
+
+  // Cargar ventas pendientes desde la base de datos
+  const loadVentasPendientes = useCallback(async () => {
+    if (!empresaId) return;
+
+    setLoadingVentasPendientes(true);
+    try {
+      console.log('Cargando ventas pendientes...');
+
+      // Usar la función getVentasPendientes que ya maneja el filtrado por estado
+      const ventas = await getVentasPendientes(empresaId) as unknown as Array<{
+        id: number;
+        clienteId: number;
+        cliente?: {
+          id: number;
+          nombre: string;
+          apellido?: string;
+          telefono?: string;
+          email?: string;
+          tipoDocumento?: string;
+          numeroDocumento?: string;
+          direccion?: string;
+          departamento?: string;
+          municipio?: string;
+          empresaId?: number;
+        };
+        clienteName?: string;
+        cliente_name?: string;
+        detalles?: Array<{
+          id: number;
+          cantidad: number;
+          precioVenta: string | number;
+          total: string | number;
+          descripcion?: string;
+          producto?: {
+            id: number;
+            nombre: string;
+            codigo?: string;
+            precioVenta?: string | number;
+            precioCompra?: string | number;
+            stock?: number;
+            descripcion?: string;
+            imagen?: string;
+            categoriaId?: number;
+            empresaId?: number;
+          };
+          productoId: number;
+        }>;
+        productos?: unknown[] | string;
+        total: string | number;
+        estado: string;
+        fecha?: string;
+        hora?: string;
+        usuarioId?: number;
+        empresaId?: number;
+        nombreVendedor?: string;
+        usuario?: {
+          id: number;
+          nombre: string;
+          apellido?: string;
+          email?: string;
+        };
+      }>;
+
+      console.log('Ventas pendientes recibidas:', ventas);
+
+      // Mapear los datos de la API al formato local
+      const ventasMapeadas = ventas.map((venta) => {
+        // Parse productos from detalles array
+        let productos: ProductoVentaPendiente[] = [];
+
+        if (Array.isArray(venta.detalles)) {
+          // Map the detalles array to ProductoVentaPendiente format
+          productos = venta.detalles.map((detalle) => ({
+            id: detalle.id || 0,
+            productoId: detalle.productoId || 0,
+            nombre: detalle.producto?.nombre || detalle.descripcion || "Producto sin nombre",
+            cantidad: detalle.cantidad || 1,
+            precioVenta: typeof detalle.precioVenta === 'number'
+              ? detalle.precioVenta.toString()
+              : detalle.precioVenta || "0",
+            total: typeof detalle.total === 'number'
+              ? detalle.total.toString()
+              : detalle.total || "0",
+            descripcion: detalle.descripcion || "",
+            producto: detalle.producto ? {
+              id: detalle.producto.id,
+              createdAt: new Date().toISOString(),
+              updatedAt: new Date().toISOString(),
+              deletedAt: null,
+              codigo: detalle.producto.codigo || "",
+              nombre: detalle.producto.nombre,
+              stockTotal: typeof detalle.producto.stock === 'number' ? detalle.producto.stock : 0,
+              tipoUnidad: "unidad", // Default value
+              precioCompra: typeof detalle.producto.precioCompra === 'number'
+                ? detalle.producto.precioCompra.toString()
+                : detalle.producto.precioCompra || "0",
+              precioVenta: typeof detalle.producto.precioVenta === 'number'
+                ? detalle.producto.precioVenta.toString()
+                : detalle.producto.precioVenta || "0",
+              marca: "", // Default value
+              modelo: "", // Default value
+              estado: "activo", // Default value
+              foto: detalle.producto.imagen || "",
+              categoriaId: detalle.producto.categoriaId || 0,
+              empresaId: detalle.producto.empresaId || 0
+            } : null
+          }));
+        } else if (Array.isArray(venta.productos)) {
+          // Fallback to productos array if detalles is not available
+          productos = (venta.productos as ProductoVentaResponse[]).map((p) => ({
+            id: p.id || 0,
+            productoId: p.productoId || 0,
+            nombre: p.nombre || "Producto sin nombre",
+            cantidad: p.cantidad || 1,
+            precioVenta: p.precioVenta?.toString() || "0",
+            total: p.total?.toString() || "0",
+            descripcion: p.descripcion || "",
+            producto: p.producto || null
+          }));
+        } else if (typeof venta.productos === "string") {
+          // If productos is a JSON string, parse it
+          try {
+            const parsedProductos = JSON.parse(venta.productos);
+            if (Array.isArray(parsedProductos)) {
+              productos = (parsedProductos as ProductoVentaResponse[]).map((p) => ({
+                id: p.id || 0,
+                productoId: p.productoId || 0,
+                nombre: p.nombre || "Producto sin nombre",
+                cantidad: p.cantidad || 1,
+                precioVenta: p.precioVenta?.toString() || "0",
+                total: p.total?.toString() || "0",
+                descripcion: p.descripcion || "",
+                producto: p.producto || null
+              }));
+            }
+          } catch (e) {
+            console.error("Error parsing productos JSON:", e);
+          }
+        }
+
+        // Obtener el nombre del cliente de la relación o de los campos planos
+        const nombreCliente = venta.cliente
+          ? `${venta.cliente.nombre}${venta.cliente.apellido ? ' ' + venta.cliente.apellido : ''}`
+          : venta.clienteName || venta.cliente_name || "Cliente no especificado";
+
+        // Obtener el nombre del vendedor de la relación de usuario o del campo plano
+        const nombreVendedor = venta.usuario
+          ? `${venta.usuario.nombre}${venta.usuario.apellido ? ' ' + venta.usuario.apellido : ''}`
+          : venta.nombreVendedor || "";
+
+        return {
+          id: venta.id,
+          clienteId: venta.clienteId,
+          clienteName: nombreCliente,
+          cliente_name: nombreCliente,
+          productos: productos,
+          total: typeof venta.total === 'number' ? venta.total.toString() : venta.total,
+          estado: (venta.estado === "pendiente" || venta.estado === "completada"
+            ? venta.estado
+            : "pendiente") as 'pendiente' | 'completada',
+          fecha: venta.fecha || format(new Date(), 'yyyy-MM-dd'),
+          hora: venta.hora || format(new Date(), 'HH:mm:ss'),
+          createdAt: 'createdAt' in venta ? venta.createdAt : new Date().toISOString(),
+          usuarioId: venta.usuarioId || 0,
+          empresaId: venta.empresaId || empresaId || 0,
+          nombreVendedor: nombreVendedor
+        };
+      });
+
+      setVentasPendientes(ventasMapeadas as unknown as VentaPendiente[]);
+    } catch (error) {
+      console.error("Error al cargar ventas pendientes:", error);
+      toast({
+        title: "Error",
+        description: "No se pudieron cargar las ventas pendientes",
+        variant: "destructive",
+      });
+    } finally {
+      setLoadingVentasPendientes(false);
+    }
+  }, [empresaId, toast]);
+
+  // Cargar ventas pendientes al montar el componente o cuando cambie empresaId
+  useEffect(() => {
+    loadVentasPendientes();
+  }, [loadVentasPendientes, empresaId]);
+
+  // Cargar venta pendiente desde URL al iniciar o cuando cambia la URL
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const ventaId = params.get("pendiente");
+
+    const loadVentaPendiente = async () => {
+      if (ventaId && !isNaN(Number(ventaId))) {
+        try {
+          // Aquí deberías implementar la lógica para cargar una venta pendiente por ID
+          // desde tu API. Por ahora, lo dejamos vacío ya que la función cargarVentaPendiente
+          // ya maneja la carga de datos.
+        } catch (error) {
+          console.error("Error al cargar la venta pendiente:", error);
+          toast({
+            title: "Error",
+            description: "No se pudo cargar la venta pendiente",
+            variant: "destructive",
+          });
+        }
+      } else {
+        // Reset form if no pending sale ID in URL
+        setProductosSeleccionados([]);
+        setSelectedCliente(null);
+        setSelectedName("");
+        setPago(0);
+        setEditingPendingSaleId(null);
+      }
+    };
+
+    loadVentaPendiente();
+  }, [location.search, empresaId, toast]);
+
+  // Filtrar productos por búsqueda y categoría
+  const filteredProductos = productos.filter((producto) => {
+    const matchesSearch =
+      producto.nombre.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (producto.codigo &&
+        producto.codigo.toLowerCase().includes(searchTerm.toLowerCase()));
+
+    const matchesCategory = selectedCategorias.length === 0 ||
+      (producto.categoriaId && selectedCategorias.includes(producto.categoriaId));
+
+    return matchesSearch && matchesCategory;
+  });
+
+  // Agregar producto a la venta
+  const agregarProducto = (producto: Producto) => {
+    // Verificar si el producto ya está en el carrito
+    const productoExistente = productosSeleccionados.find(
+      (p) => p.producto.id === producto.id
+    );
+
+    // Calcular la cantidad que se intenta agregar
+    const cantidadAAgregar = productoExistente ? productoExistente.cantidad + 1 : 1;
+
+    // Verificar stock disponible
+    const { suficiente, mensaje } = verificarStockDisponible(producto, cantidadAAgregar);
+
+    if (!suficiente) {
+      toast({
+        title: "Error de stock",
+        description: mensaje,
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (productoExistente) {
+      // Si ya existe, incrementar la cantidad
+      setProductosSeleccionados((prev) =>
+        prev.map((p) =>
+          p.producto.id === producto.id
+            ? { ...p, cantidad: cantidadAAgregar }
+            : p
+        )
+      );
+    } else {
+      // Si no existe, verificar si hay un producto con el mismo nombre pero distinto ID
+      const productoConMismoNombre = productosSeleccionados.find(
+        p => p.producto.nombre.toLowerCase() === producto.nombre.toLowerCase()
+      );
+
+      if (productoConMismoNombre) {
+        // Si encontramos un producto con el mismo nombre, actualizamos ese en lugar de agregar uno nuevo
+        const nuevaCantidad = productoConMismoNombre.cantidad + 1;
+        setProductosSeleccionados((prev) =>
+          prev.map((p) =>
+            p.producto.id === productoConMismoNombre.producto.id
+              ? { ...p, cantidad: nuevaCantidad }
+              : p
+          )
+        );
+      } else {
+        // Si no hay ningún producto con el mismo nombre, lo agregamos como nuevo
+        setProductosSeleccionados((prev) => [
+          ...prev,
+          {
+            producto,
+            cantidad: 1,
+            precio: producto.precioVenta.toString(),
+          },
+        ]);
+      }
+    }
+  };
+
+  // Actualizar cantidad de producto
+  const actualizarCantidad = (productoId: number, cantidad: number) => {
+    // ... (rest of the code remains the same)
+    if (cantidad < 1) return;
+
+    const producto = productos.find((p) => p.id === productoId);
+    if (!producto) return;
+
+    const { suficiente, mensaje } = verificarStockDisponible(producto, cantidad);
+
+    if (!suficiente) {
+      toast({
+        title: "Error de stock",
+        description: mensaje,
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setProductosSeleccionados((prev) =>
+      prev.map((p) => (p.producto.id === productoId ? { ...p, cantidad } : p))
+    );
+  };
+
+  // Función para incrementar la cantidad de un producto en el carrito
+  const handleIncrement = (producto: Producto) => {
+    const productoEnCarrito = productosSeleccionados.find(p => p.producto.id === producto.id);
+    if (!productoEnCarrito) return;
+
+    const nuevaCantidad = productoEnCarrito.cantidad + 1;
+    const { suficiente, mensaje } = verificarStockDisponible(producto, nuevaCantidad);
+
+    if (!suficiente) {
+      toast({
+        title: "Error de stock",
+        description: mensaje,
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setProductosSeleccionados((prev) =>
+      prev.map((p) =>
+        p.producto.id === producto.id
+          ? { ...p, cantidad: nuevaCantidad }
+          : p
+      )
+    );
+  };
+
+  // Función para eliminar un producto del carrito
+  const eliminarProducto = (productoId: number) => {
+    setProductosSeleccionados(prev =>
+      prev.filter(p => p.producto.id !== productoId)
+    );
+  };
+
+
+  // Función para verificar el stock disponible
+  const verificarStockDisponible = (producto: Producto, cantidadDeseada: number): { suficiente: boolean; mensaje: string } => {
+    const stockDisponible = Number(producto.stockTotal) || 0;
+    if (stockDisponible <= 0) {
+      return { suficiente: false, mensaje: `No hay stock disponible para ${producto.nombre}` };
+    }
+    if (cantidadDeseada > stockDisponible) {
+      return {
+        suficiente: false,
+        mensaje: `Stock insuficiente para ${producto.nombre}. Stock disponible: ${stockDisponible}`
+      };
+    }
+    return { suficiente: true, mensaje: '' };
+  };
+
+  // Función para manejar la eliminación de una venta pendiente
+  const handleDeleteVentaPendiente = async (ventaId: number) => {
+    try {
+      await deleteVentaPendiente(ventaId);
+      await loadVentasPendientes();
+      toast({
+        title: "Venta pendiente eliminada",
+        description: "La venta pendiente ha sido eliminada correctamente.",
+      });
+
+      // Si la venta que se está editando fue eliminada, limpiar el estado
+      if (editingPendingSaleId === ventaId) {
+        setEditingPendingSaleId(null);
+        navigate("/vender", { replace: true });
+      }
+    } catch (error) {
+      console.error("Error al eliminar venta pendiente:", error);
+      toast({
+        title: "Error",
+        description: "No se pudo eliminar la venta pendiente",
+        variant: "destructive",
+      });
+    }
+  };
+
+  // Cargar una venta pendiente desde la base de datos
+  const cargarVentaPendiente = async (venta: VentaPendiente) => {
+    try {
+      // Usar un mapa para agrupar productos por nombre (sin importar mayúsculas/minúsculas)
+      const productosPorNombre = new Map<string, ProductoSeleccionado>();
+
+      // Procesar cada producto de la venta pendiente
+      venta.productos.forEach((item) => {
+        // Usar el producto del detalle si existe, o crear uno básico
+        const productoDetalle = item.producto || {} as Producto;
+        const productoId = item.productoId || item.id;
+
+        const precioVenta = typeof item.precioVenta === 'string'
+          ? parseFloat(item.precioVenta)
+          : item.precioVenta || 0;
+
+        const precioCompra = (item as any).precioCompra || (productoDetalle.precioCompra || '0');
+
+        const nombreNormalizado = (item.nombre || productoDetalle.nombre || `Producto ${productoId}`)
+          .toLowerCase()
+          .trim();
+
+        const producto: Producto = {
+          id: productoId,
+          nombre: item.nombre || productoDetalle.nombre || `Producto ${productoId}`,
+          precioVenta: precioVenta.toString(),
+          precioCompra: precioCompra.toString(),
+          stockTotal: productoDetalle.stockTotal || 0,
+          tipoUnidad: productoDetalle.tipoUnidad || 'unidad',
+          descripcion: item.descripcion || productoDetalle.descripcion || '',
+          marca: productoDetalle.marca || '',
+          modelo: productoDetalle.modelo || '',
+          estado: 'activo',
+          categoriaId: productoDetalle.categoriaId || 1,
+          empresaId: productoDetalle.empresaId || empresaId || 1,
+          codigo: productoDetalle.codigo || `PROD-${productoId}`,
+          foto: productoDetalle.foto || '',
+          createdAt: productoDetalle.createdAt || new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          deletedAt: null,
+        };
+
+        const productoSeleccionado: ProductoSeleccionado = {
+          producto,
+          cantidad: item.cantidad || 1,
+          precio: precioVenta.toString(),
+        };
+
+        // Verificar si ya existe un producto con el mismo nombre
+        const existente = productosPorNombre.get(nombreNormalizado);
+        if (existente) {
+          // Si existe, sumar las cantidades
+          existente.cantidad += item.cantidad || 1;
+          // Actualizar el precio al del último producto (o podrías promediarlos si prefieres)
+          existente.precio = precioVenta.toString();
+        } else {
+          // Si no existe, agregarlo al mapa
+          productosPorNombre.set(nombreNormalizado, productoSeleccionado);
+        }
+      });
+
+      // Convertir el mapa de vuelta a un array
+      const productosUnificados = Array.from(productosPorNombre.values());
+
+      // Actualizar el estado con los productos unificados
+      setProductosSeleccionados(productosUnificados);
+      // Buscar el cliente por ID si existe
+      const cliente = venta.clienteId ? clientes.find(c => c.id === venta.clienteId) || null : null;
+      setSelectedCliente(cliente);
+      setSelectedName(cliente ? `${cliente.nombre} ${cliente.apellido || ''}`.trim() : "");
+      // No es necesario establecer el estado aquí ya que se maneja en el formulario
+      setPago(0);
+      setEditingPendingSaleId(venta.id);
+
+      // Actualizar la URL para reflejar la venta cargada
+      navigate(`/vender?pendiente=${venta.id}`, { replace: true });
+
+      toast({
+        title: "Venta cargada",
+        description: "Puedes continuar con la venta pendiente.",
+      });
+    } catch (error) {
+      console.error("Error al cargar la venta pendiente:", error);
+      toast({
+        title: "Error",
+        description: "No se pudo cargar la venta pendiente",
+        variant: "destructive",
+      });
+    }
+  };
+
+  // Función para crear o actualizar una venta pendiente
+  const handleConvertirAPendiente = async () => {
+    if (!currentUser || !empresaId) {
+      toast({
+        title: "Error",
+        description: "No se pudo autenticar el usuario o la empresa",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (productosSeleccionados.length === 0) {
+      toast({
+        title: "Error",
+        description: "No hay productos seleccionados",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    try {
+      setLoading(true);
+
+      // Obtener el usuario autenticado
+      const authUser = currentUser;
+      const nombreVendedor = authUser.nombre || "Vendedor";
+
+      // Obtener el código de la venta actual si estamos editando
+      let codigoVenta = `V-${Date.now()}`; // Valor por defecto
+      let ventaActual;
+
+      if (editingPendingSaleId) {
+        try {
+          ventaActual = await getVentaPendienteById(editingPendingSaleId);
+          if (ventaActual?.codigo) {
+            codigoVenta = ventaActual.codigo;
+          }
+        } catch (error) {
+          console.error('Error al obtener la venta actual:', error);
+        }
+      }
+
+      // Obtener fecha y hora actual
+      const now = new Date();
+      // Formato YYYY-MM-DD en hora local
+      const fecha = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+
+      // Usar la hora local directamente
+      const hora = formatTime(now);
+
+      // Crear los detalles de la venta en el formato que espera el backend
+      const detallesVenta = productosSeleccionados.map((p) => {
+        // Asegurarse de que el ID del producto sea correcto
+        const productoId = p.producto.id;
+        const precioVenta = p.precio;
+        const precioCompra = p.producto.precioCompra || '0.00';
+        const cantidad = p.cantidad;
+        const total = (cantidad * parseFloat(precioVenta)).toFixed(2);
+
+        return {
+          id: 0, // 0 para nuevos detalles, se asignará ID en el backend
+          cantidad: cantidad,
+          precioVenta: precioVenta,
+          precioCompra: precioCompra,
+          total: total,
+          descripcion: p.producto.nombre,
+          productoId: productoId, // Usar el ID del producto, no del detalle
+          empresaId: empresaId,
+          ventaId: editingPendingSaleId || 0, // 0 si es nueva venta
+          venta_codigo: codigoVenta, // Incluir el código de venta
+          ventaCodigo: codigoVenta // Incluir también en formato camelCase para compatibilidad
+        };
+      });
+
+      // Crear un mapa para rastrear los productos por ID de producto
+      const productosPorProductoId = new Map<number, ProductoVentaPendiente>();
+
+      // Primero, procesar los productos existentes en la venta actual (si estamos editando)
+      if (editingPendingSaleId) {
+        try {
+          const ventaActual = await getVentaPendienteById(editingPendingSaleId);
+          if (ventaActual.productos && Array.isArray(ventaActual.productos)) {
+            ventaActual.productos.forEach((p: any) => {
+              try {
+                // Extraer valores con valores por defecto seguros
+                const productoId = (p.productoId || p.id || 0) as number;
+                const nombre = (p.nombre || p.descripcion || `Producto ${productoId}`).toString();
+                const descripcion = (p.descripcion || nombre).toString();
+                const cantidad = Number(p.cantidad) || 0;
+                const precioVenta = (p.precioVenta || '0').toString();
+                const total = (p.total || '0').toString();
+                const precioCompra = (p.precioCompra || '0').toString();
+
+                // Crear el objeto producto con todos los campos requeridos
+                const producto: ProductoVentaPendiente = {
+                  id: Number(p.id) || 0,
+                  productoId: productoId,
+                  nombre: nombre,
+                  cantidad: cantidad,
+                  precioVenta: precioVenta,
+                  total: total,
+                  descripcion: descripcion,
+                  precioCompra: precioCompra,
+                  // @ts-ignore - Ignoramos el error de tipo para la propiedad producto
+                  producto: p.producto || null
+                };
+
+                // Agregar propiedades opcionales si existen
+                if (p.createdAt) producto.createdAt = p.createdAt;
+                if (p.updatedAt) producto.updatedAt = p.updatedAt;
+                if ('deletedAt' in p) producto.deletedAt = p.deletedAt;
+                if (p.empresaId) producto.empresaId = Number(p.empresaId);
+
+                productosPorProductoId.set(productoId, producto);
+              } catch (error) {
+                console.error('Error al procesar producto:', p, error);
+              }
+            });
+          }
+        } catch (error) {
+          console.error('Error al obtener la venta actual:', error);
+        }
+      }
+
+      // Procesar los productos seleccionados
+      const productosSeleccionadosMap = new Map<number, ProductoSeleccionado>();
+
+      // Agrupar productos seleccionados por ID de producto para sumar cantidades
+      productosSeleccionados.forEach((p) => {
+        const productoId = p.producto.id;
+        const existente = productosSeleccionadosMap.get(productoId);
+
+        if (existente) {
+          existente.cantidad += p.cantidad;
+        } else {
+          productosSeleccionadosMap.set(productoId, { ...p });
+        }
+      });
+
+      // Combinar con los productos existentes
+      productosSeleccionadosMap.forEach((p) => {
+        // Obtener el ID del producto y asegurarse de que sea un string
+        const productoId = String(p.producto.id);
+
+        // Convertir el ID a número de forma segura
+        const productoIdNum = parseInt(productoId, 10);
+
+        // Asegurarse de que el ID sea un número válido
+        if (isNaN(productoIdNum) || productoIdNum <= 0) {
+          console.error('ID de producto no válido:', p.producto.id);
+          return; // Saltar este producto si el ID no es válido
+        }
+
+        // Función auxiliar para convertir a número de forma segura
+        const safeToNumber = (value: any): number => {
+          if (value === null || value === undefined) return 0;
+          if (typeof value === 'number') return value;
+          if (typeof value === 'string') return parseFloat(value) || 0;
+          return Number(value) || 0;
+        };
+
+        // Función auxiliar para convertir a string de forma segura
+        const safeToString = (value: any): string => {
+          if (value === null || value === undefined) return '0';
+          if (typeof value === 'string') return value;
+          if (typeof value === 'number') return value.toString();
+          return String(value);
+        };
+
+        const productoExistente = productosPorProductoId.get(productoIdNum);
+
+        if (productoExistente) {
+          // Si el producto ya existe, actualizamos la cantidad y el total
+          productoExistente.cantidad += p.cantidad;
+
+          const precioExistente = safeToNumber(productoExistente.precioVenta);
+          const totalExistente = safeToNumber(productoExistente.total);
+          const precioNuevo = safeToNumber(p.precio);
+
+          productoExistente.total = (totalExistente + (p.cantidad * precioNuevo)).toFixed(2);
+        } else {
+          // Función auxiliar para convertir a string de forma segura
+          const safeToString = (value: any): string => {
+            if (value === null || value === undefined) return '0';
+            if (typeof value === 'string') return value;
+            if (typeof value === 'number') return value.toString();
+            if (typeof value === 'boolean') return value ? '1' : '0';
+            return String(value);
+          };
+
+          // Si es un producto nuevo, lo agregamos al mapa
+          const precioVenta = safeToString(p.precio);
+          const precioCompra = p.producto.precioCompra ? safeToString(p.producto.precioCompra) : '0';
+
+          // Asegurarse de que el ID sea un número
+          const productoIdNum = parseInt(productoId, 10);
+
+          productosPorProductoId.set(productoIdNum, {
+            id: 0, // Se asignará un nuevo ID en el backend
+            nombre: p.producto.nombre,
+            cantidad: p.cantidad,
+            precioVenta: precioVenta,
+            total: (p.cantidad * parseFloat(precioVenta)).toFixed(2),
+            descripcion: p.producto.nombre,
+            precioCompra: precioCompra,
+            productoId: productoIdNum, // Usar el ID numérico
+            producto: p.producto
+          });
+        }
+      });
+
+      // Convertir el mapa a array para productosVenta, asegurando que todos los campos requeridos estén presentes
+      const productosVenta: ProductoVentaPendiente[] = Array.from(productosPorProductoId.values()).map(p => {
+        // Asegurarse de que productoId siempre tenga un valor válido
+        const productoId = p.productoId || (p.producto?.id || 0);
+        const nombre = p.nombre || p.producto?.nombre || `Producto ${productoId || 'desconocido'}`;
+        const descripcion = p.descripcion || nombre;
+        const precioVenta = p.precioVenta || '0';
+        const total = p.total || '0';
+        const cantidad = p.cantidad || 0;
+        const precioCompra = p.precioCompra || p.producto?.precioCompra || '0';
+
+        // Crear el objeto con todos los campos requeridos
+        const productoVenta: ProductoVentaPendiente = {
+          id: p.id || 0,
+          productoId: productoId,
+          nombre: nombre,
+          cantidad: cantidad,
+          precioVenta: typeof precioVenta === 'string' ? precioVenta : precioVenta.toString(),
+          total: typeof total === 'string' ? total : total.toString(),
+          descripcion: descripcion,
+          precioCompra: typeof precioCompra === 'string' ? precioCompra : precioCompra.toString(),
+          producto: p.producto || null
+        };
+
+        // Agregar campos opcionales si existen
+        if (p.createdAt) productoVenta.createdAt = p.createdAt;
+        if (p.updatedAt) productoVenta.updatedAt = p.updatedAt;
+        if (p.deletedAt !== undefined) productoVenta.deletedAt = p.deletedAt;
+        if (p.empresaId) productoVenta.empresaId = p.empresaId;
+
+        return productoVenta;
+      });
+
+      // Actualizar el total general
+      const nuevoTotal = productosVenta.reduce((sum, p) => {
+        const total = typeof p.total === 'string' ? p.total : String(p.total || '0');
+        return sum + (parseFloat(total) || 0);
+      }, 0);
+
+      const clienteName = selectedCliente
+        ? `${selectedCliente.nombre || ''} ${selectedCliente.apellido || ''}`.trim()
+        : 'Cliente no registrado';
+
+      const ventaData: CreateVentaPendiente = {
+        detalles: detallesVenta,
+        clienteId: selectedCliente?.id || null,
+        clienteName,
+        total: total.toFixed(2),
+        estado: 'pendiente',
+        fecha,
+        nombreVendedor,
+        usuarioId: authUser.id || 1,
+        empresaId,
+        pagado: '0.00',
+        cambio: '0.00',
+        cajaId: currentUser?.cajaId || 1,
+        codigo: codigoVenta, // Usar el código de venta existente si estamos editando
+        hora: formatTime(now),
+        // Asegurarse de que los productos tengan el formato correcto
+        productos: productosVenta.map(p => ({
+          id: p.id || 0,
+          productoId: p.productoId || 0,
+          nombre: p.nombre || '',
+          cantidad: p.cantidad || 0,
+          precioVenta: String(p.precioVenta || '0'),
+          total: String(p.total || '0'),
+          descripcion: p.descripcion || '',
+          precioCompra: p.precioCompra ? String(p.precioCompra) : '0',
+          ventaId: editingPendingSaleId,
+          ventaCodigo: ventaActual?.codigo || codigoVenta, // Asegurar que siempre tenga un código
+          venta_codigo: ventaActual?.codigo || codigoVenta, // Incluir también en snake_case
+          empresaId: p.empresaId || empresaId,
+          producto: p.producto || null
+        }))
+      };
+
+      if (editingPendingSaleId) {
+        // Obtener la venta pendiente actual para combinar los productos
+        const ventaActual = await getVentaPendienteById(editingPendingSaleId);
+
+        // Crear un mapa para rastrear los productos por nombre (para evitar duplicados)
+        const productosPorNombre = new Map<string, ProductoVentaPendiente>();
+
+        // Primero, procesar los productos existentes de la venta
+        if (ventaActual.detalles && Array.isArray(ventaActual.detalles)) {
+          ventaActual.detalles.forEach(detalle => {
+            if (detalle && detalle.descripcion) {
+              const nombreNormalizado = detalle.descripcion.trim().toLowerCase();
+              const productoExistente = productosPorNombre.get(nombreNormalizado);
+
+              if (productoExistente) {
+                // Si ya existe un producto con el mismo nombre, usar ese ID
+                detalle.productoId = productoExistente.id;
+              }
+
+              productosPorNombre.set(nombreNormalizado, {
+                id: detalle.productoId || 0, // Ensure id is always a number
+                productoId: detalle.productoId || 0, // Add the required productoId
+                nombre: detalle.descripcion,
+                cantidad: detalle.cantidad,
+                precioVenta: detalle.precioVenta,
+                total: detalle.total,
+                descripcion: detalle.descripcion,
+                precioCompra: detalle.precioCompra,
+                producto: detalle.producto || {
+                  id: detalle.productoId,
+                  nombre: detalle.descripcion,
+                  precioCompra: detalle.precioCompra || '0.00',
+                  precioVenta: detalle.precioVenta,
+                } as Producto
+              });
+            }
+          });
+        }
+
+        // Luego, actualizar o agregar los productos del carrito
+        productosVenta.forEach(nuevoProducto => {
+          const nombreProducto = (nuevoProducto.nombre || nuevoProducto.descripcion || '').trim().toLowerCase();
+          const productoExistente = productosPorNombre.get(nombreProducto);
+
+          if (productoExistente) {
+            // Si el producto ya existe, actualizamos la cantidad y el total
+            const cantidadTotal = productoExistente.cantidad + nuevoProducto.cantidad;
+            productosPorNombre.set(nombreProducto, {
+              ...productoExistente,
+              cantidad: cantidadTotal,
+              total: (cantidadTotal * parseFloat(String(productoExistente.precioVenta || '0'))).toFixed(2)
+            });
+          } else {
+            // Si es un producto nuevo, lo agregamos al mapa
+            const productoId = nuevoProducto.producto?.id || nuevoProducto.id;
+            productosPorNombre.set(nombreProducto, {
+              ...nuevoProducto,
+              id: productoId,
+              nombre: nuevoProducto.nombre || nuevoProducto.descripcion || ''
+            });
+          }
+        });
+
+        // Convertir el mapa a un array de productos combinados
+        const productosCombinados = Array.from(productosPorNombre.values());
+
+        // Crear los detalles para el backend
+        const detallesCombinados = productosCombinados.map(p => {
+          const productoId = p.producto?.id || p.id;
+          const producto = p.producto || {
+            id: p.id,
+            nombre: p.nombre,
+            precioCompra: p.precioCompra,
+            precioVenta: p.precioVenta
+          };
+
+          return {
+            cantidad: p.cantidad,
+            precioVenta: String(p.precioVenta || '0'),
+            precioCompra: String(producto.precioCompra || p.precioCompra || '0.00'),
+            total: (p.cantidad * parseFloat(String(p.precioVenta || '0'))).toFixed(2),
+            descripcion: p.descripcion || p.nombre || producto.nombre || '',
+            productoId: productoId,
+            empresaId: empresaId
+          };
+        });
+
+        // Calcular el nuevo total
+        const nuevoTotal = detallesCombinados.reduce((sum, d) => sum + parseFloat(d.total), 0).toFixed(2);
+
+        // Asegurarse de que los detalles tengan los tipos correctos
+        const detallesConTiposCorrectos = detallesCombinados.map(d => {
+          // Función auxiliar para convertir a string de forma segura
+          const safeToString = (value: any): string => {
+            if (value === null || value === undefined) return '0';
+            if (typeof value === 'string') return value;
+            if (typeof value === 'number') return value.toString();
+            if (typeof value === 'boolean') return value ? '1' : '0';
+            return String(value);
+          };
+
+          return {
+            ...d,
+            precioVenta: safeToString(d.precioVenta),
+            precioCompra: safeToString(d.precioCompra),
+            total: safeToString(d.total),
+            cantidad: d.cantidad,
+            descripcion: d.descripcion || '',
+            productoId: d.productoId,
+            empresaId: d.empresaId || 1
+          };
+        });
+
+        // Crear el objeto de actualización con los datos combinados
+        const updateData = {
+          ...ventaData,
+          estado: 'pendiente',
+          detalles: detallesConTiposCorrectos,
+          id: editingPendingSaleId,
+          total: nuevoTotal,
+          // Asegurarse de que los productos estén en el formato correcto
+          productos: productosCombinados.map(p => ({
+            id: p.id,
+            productoId: p.productoId || p.producto?.id || 0,
+            nombre: p.nombre || p.producto?.nombre || '',
+            cantidad: p.cantidad,
+            precioVenta: typeof p.precioVenta === 'string' ? p.precioVenta : p.precioVenta.toString(),
+            precioCompra: (p.precioCompra || p.producto?.precioCompra || '0.00').toString(),
+            total: (p.cantidad * (typeof p.precioVenta === 'string' ? parseFloat(p.precioVenta) : Number(p.precioVenta))).toFixed(2),
+            descripcion: p.descripcion || p.producto?.nombre || '',
+            producto: p.producto || null,
+            empresaId: p.empresaId || 1 // Default to 1 if not provided
+          }))
+        };
+
+        console.log('Datos de actualización de venta pendiente:', updateData);
+        const ventaActualizada = await updateVentaPendiente(editingPendingSaleId, updateData);
+
+        toast({
+          title: "Venta pendiente actualizada",
+          description: `La venta pendiente se ha actualizado correctamente.`,
+        });
+      } else {
+        // Crear nueva venta pendiente
+        const nuevaVenta = await createVentaPendiente(ventaData);
+
+        toast({
+          title: "Venta guardada como pendiente",
+          description: `La venta se ha guardado correctamente como pendiente.`,
+        });
+      }
+
+      // Limpiar el formulario
+      setProductosSeleccionados([]);
+      setSelectedCliente(null);
+      setSelectedName("");
+      setPago(0);
+      setEditingPendingSaleId(null);
+
+      // Recargar la lista de ventas pendientes
+      await loadVentasPendientes();
+
+      // Redirigir a la página de ventas pendientes
+      navigate("/ventas-pendientes");
+    } catch (error) {
+      console.error("Error al guardar venta pendiente:", error);
+      toast({
+        title: "Error",
+        description: `No se pudo ${editingPendingSaleId ? 'actualizar' : 'guardar'} la venta como pendiente`,
+        variant: "destructive",
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Verificar stock antes de guardar la venta
+  const verificarStockVenta = async (): Promise<{ valido: boolean; mensaje: string }> => {
+    try {
+      // Verificar stock para cada producto en el carrito
+      for (const item of productosSeleccionados) {
+        const productoActual = await getProductoById(item.producto.id);
+        if (!productoActual) {
+          return {
+            valido: false,
+            mensaje: `No se pudo verificar el stock para ${item.producto.nombre}`
+          };
+        }
+
+        const stockDisponible = Number(productoActual.stockTotal) || 0;
+        if (stockDisponible < item.cantidad) {
+          return {
+            valido: false,
+            mensaje: `Stock insuficiente para ${item.producto.nombre}. Stock disponible: ${stockDisponible}`
+          };
+        }
+      }
+      return { valido: true, mensaje: '' };
+    } catch (error) {
+      console.error('Error al verificar stock:', error);
+      return {
+        valido: false,
+        mensaje: 'Error al verificar el stock de los productos'
+      };
+    }
+  };
+
+  // Calcular total y cambio
+  const total = productosSeleccionados.reduce(
+    (sum, item) => sum + item.cantidad * parseFloat(item.precio),
+    0
+  );
+
+  const cambio = pago - total;
+
+  // Guardar venta finalizada
+  const guardarVenta = async () => {
+    // Verificar autenticación
+    if (!currentUser?.id) {
+      toast({
+        title: "Error",
+        description: "Usuario no autenticado.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    // Si no hay cliente seleccionado, usar null
+    const clienteId = selectedCliente?.id || null;
+
+    // Verificar productos seleccionados
+    if (productosSeleccionados.length === 0) {
+      toast({
+        title: "Error",
+        description: "Debe agregar al menos un producto",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    // Verificar pago
+    if (pago < total) {
+      toast({
+        title: "Error",
+        description: "El pago no cubre el total de la venta",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    // Verificar stock
+    const resultadoVerificacion = await verificarStockVenta();
+    if (!resultadoVerificacion.valido) {
+      toast({
+        title: "Error de stock",
+        description: resultadoVerificacion.mensaje,
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setLoading(true);
+    try {
+      let venta;
+
+      if (editingPendingSaleId) {
+        // Si es una venta pendiente, usar la función actualizarYFinalizarVenta
+        // que maneja correctamente la actualización y finalización en una sola operación
+        if (!selectedCajaId) {
+          toast({
+            title: "Error",
+            description: "Debe seleccionar una caja para continuar",
+            variant: "destructive",
+          });
+          setLoading(false);
+          return;
+        }
+
+        // Preparar los datos de la venta actualizada
+        const ventaData = {
+          clienteId: selectedCliente?.id || null,
+          clienteName: selectedCliente
+            ? `${selectedCliente.nombre || ''} ${selectedCliente.apellido || ''}`.trim()
+            : 'Cliente no registrado',
+          total: total.toString(),
+          detalles: productosSeleccionados.map(p => ({
+            productoId: p.producto.id,
+            cantidad: p.cantidad,
+            precioVenta: p.precio,
+            precioCompra: p.producto.precioCompra || '0',
+            total: (parseFloat(p.precio) * p.cantidad).toString(),
+            descripcion: p.producto.nombre || '',
+            empresaId: empresaId
+          })),
+        };
+
+        // Usar la nueva función que actualiza y finaliza la venta
+        venta = await actualizarYFinalizarVenta(
+          editingPendingSaleId,
+          ventaData,
+          {
+            pagado: pago.toFixed(2),
+            cambio: cambio.toFixed(2),
+            cajaId: selectedCajaId,
+            usuarioId: currentUser.id,
+            empresaId: empresaId || 1
+          }
+        );
+      } else {
+        // Si es una venta nueva, crearla normalmente
+        const ventaData = {
+          codigo: `V-${Date.now()}`,
+          clienteId: clienteId, // Puede ser null si no hay cliente
+          clienteName: selectedCliente
+            ? `${selectedCliente.nombre || ''} ${selectedCliente.apellido || ''}`.trim()
+            : 'Cliente no registrado',
+          usuarioId: currentUser.id,
+          empresaId,
+          estado: 'completada',
+          total: total.toString(),
+          pago: pago.toString(),
+          cambio: Math.max(0, cambio).toString(),
+          // Usar la fecha local
+          fecha: (() => {
+            const now = new Date();
+            const year = now.getFullYear();
+            const month = String(now.getMonth() + 1).padStart(2, '0');
+            const day = String(now.getDate()).padStart(2, '0');
+            return `${year}-${month}-${day}`;
+          })(),
+          nombreVendedor: currentUser.nombre || 'Vendedor',
+          // Usar la hora local actual
+          hora: formatTime(new Date()),
+          pagado: '1', // Using '1' as string to match CreateVenta interface, will be converted to decimal by the database
+          cajaId: selectedCajaId || 1, // Usar la caja seleccionada o 1 como respaldo
+          detalles: productosSeleccionados.map(p => ({
+            productoId: p.producto.id,
+            cantidad: p.cantidad,
+            precioVenta: p.precio,
+            precioCompra: p.producto.precioCompra || '0',
+            subtotal: (parseFloat(p.precio) * p.cantidad).toString(),
+            total: (parseFloat(p.precio) * p.cantidad).toString(),
+            descripcion: p.producto.nombre || '',
+            ventaCodigo: `V-${Date.now()}`,
+            empresaId: empresaId // Add empresaId to each detail item
+          }))
+        };
+
+        venta = await createVenta(ventaData);
+
+        // No es necesario actualizar el stock manualmente aquí
+        // ya que el backend ya lo maneja al crear la venta
+      }
+
+      // Reset form state after successful sale
+      setProductosSeleccionados([]);
+      setSelectedCliente(null);
+      setSelectedName("");
+      setPago(0);
+      setEditingPendingSaleId(null);
+
+      // Mostrar mensaje de éxito
+      toast({
+        title: "¡Venta realizada!",
+        description: `La venta ${venta.codigo} se ha registrado correctamente.`,
+        variant: "default",
+      });
+
+      // Redirigir a la página de ventas con un parámetro para forzar recarga
+      setTimeout(() => {
+        navigate("/ventas?refresh=true");
+      }, 1000);
+    } catch (error) {
+      console.error("Error al registrar la venta:", error); // Log detailed error
+      toast({
+        title: "Error",
+        description: "No se pudo registrar la venta. Intenta de nuevo.",
+        variant: "destructive",
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="space-y-6">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-bold flex items-center">
+          <ShoppingCart className="mr-2 h-6 w-6" />
+          {editingPendingSaleId ? "Editando Venta Pendiente" : "Nueva Venta"}
+        </h1>
+        <div className="flex gap-2">
+          {/* Adjusted button for responsive text */}
+          <Button variant="outline" onClick={() => navigate("/ventas")}>
+            <ListOrdered className="h-4 w-4 md:mr-2" />
+            <span className="hidden md:inline">Lista de Ventas</span>
+          </Button>
+          {/* Pending Sales Sheet Trigger */}
+          <Sheet>
+            <SheetTrigger asChild>
+              {/* Adjusted gap and added spans for responsive text/badge */}
+              <Button
+                variant="outline"
+                className="flex items-center gap-0 md:gap-2"
+              >
+                <Clock className="h-4 w-4" />
+                <span className="hidden md:inline">Ventas Pendientes</span>
+                {ventasPendientes.length > 0 && (
+                  <span className="ml-1 rounded-full bg-primary w-5 h-5 hidden md:flex items-center justify-center text-xs text-primary-foreground">
+                    {ventasPendientes.length}
+                  </span>
+                )}
+              </Button>
+            </SheetTrigger>
+            <SheetContent side="right" className="w-[400px] sm:w-[540px]">
+              <SheetHeader>
+                <SheetTitle>Ventas Pendientes</SheetTitle>
+              </SheetHeader>
+              <ScrollArea className="h-[calc(100vh-8rem)] mt-4">
+                <div className="space-y-4">
+                  {loadingVentasPendientes ? (
+                    <div className="flex justify-center py-4">
+                      <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+                    </div>
+                  ) : ventasPendientes.length === 0 ? (
+                    <p className="text-center text-muted-foreground py-4">
+                      No hay ventas pendientes
+                    </p>
+                  ) : (
+                    ventasPendientes.map((venta) => (
+                      <div
+                        key={venta.id}
+                        className="p-4 border rounded-lg hover:bg-accent relative"
+                      >
+                        {/* Delete Button */}
+                        <div className="absolute bottom-2 right-2 z-10">
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="text-red-500 hover:bg-red-100 h-6 w-6 p-1"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setSaleToDelete(venta.id);
+                            }}
+                          >
+                            <X className="h-4 w-4" />
+                          </Button>
+                        </div>
+                        {/* Clickable Area */}
+                        <div
+                          className="cursor-pointer"
+                          onClick={() => cargarVentaPendiente(venta)}
+                        >
+                          <div className="flex justify-between items-start mb-2">
+                            <div>
+                              <p className="font-medium">
+                                {venta.productos.length} productos
+                              </p>
+                              <p className="font-medium">
+                                {venta.clienteName || "Sin cliente"}
+                              </p>
+                              <p className="text-sm text-muted-foreground">
+                                {venta.createdAt 
+                                  ? new Date(venta.createdAt).toLocaleDateString('es-GT')
+                                  : venta.fecha || 'Fecha no disponible'}
+                              </p>
+                            </div>
+                            <span className="font-bold">
+                              {formatCurrency(venta.total)}
+                            </span>
+                          </div>
+                          <div className="space-y-1">
+                            {venta.productos.slice(0, 3).map((item) => (
+                              <p
+                                key={item.producto.id}
+                                className="text-sm text-muted-foreground"
+                              >
+                                {item.cantidad}x {item.producto.nombre}
+                              </p>
+                            ))}
+                            {venta.productos.length > 3 && (
+                              <p className="text-sm text-muted-foreground">
+                                Y {venta.productos.length - 3} más...
+                              </p>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </ScrollArea>
+              {/* Delete Confirmation Dialog Instance */}
+              <DeleteDialog
+                open={!!saleToDelete}
+                onOpenChange={(isOpen) => !isOpen && setSaleToDelete(null)}
+                onConfirm={async () => {
+                  if (saleToDelete) {
+                    try {
+                      await handleDeleteVentaPendiente(saleToDelete);
+                      setSaleToDelete(null);
+                    } catch (error) {
+                      console.error(
+                        "Error al eliminar venta pendiente:",
+                        error
+                      );
+                      toast({
+                        title: "Error",
+                        description: "No se pudo eliminar la venta pendiente",
+                        variant: "destructive",
+                      });
+                    }
+                  }
+                }}
+                title="Confirmar Eliminación"
+                description="¿Estás seguro de que deseas eliminar esta venta pendiente? Esta acción no se puede deshacer."
+              />
+            </SheetContent>
+          </Sheet>
+        </div>
+      </div>
+
+      {/* Main Layout Grid */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* Left Column: Product Search and List */}
+        <div className="lg:col-span-2 space-y-4">
+          {/* Search and Filter */}
+          <div className="flex gap-2">
+            <div className="relative flex-1">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <Input
+                placeholder="Buscar productos por nombre o código..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="pl-9"
+              />
+            </div>
+            {/* Category Filter Popover */}
+            <Popover open={open} onOpenChange={setOpen}>
+              <PopoverTrigger asChild>
+                <Button
+                  variant="outline"
+                  className="w-[200px] flex items-center justify-between"
+                >
+                  <div className="flex items-center gap-2 truncate">
+                    <Filter className="h-4 w-4" />
+                    <span className="truncate">
+                      {selectedCategorias.length === 0
+                        ? "Todas las categorías"
+                        : selectedCategorias.length === 1
+                          ? categorias.find((c) => c.id === selectedCategorias[0])
+                            ?.nombre
+                          : `${selectedCategorias.length} categorías`}
+                    </span>
+                  </div>
+                  <ChevronDown className="h-4 w-4 opacity-50" />
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-[200px] p-0" align="end">
+                <div className="p-2">
+                  <div className="mb-2 px-2 py-1.5">
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <Checkbox
+                        checked={selectedCategorias.length === 0}
+                        onCheckedChange={() => setSelectedCategorias([])}
+                      />
+                      <span className="text-sm font-medium">
+                        Todas las categorías
+                      </span>
+                    </label>
+                  </div>
+                  <ScrollArea className="max-h-[300px]">
+                    {categorias.map((categoria) => (
+                      <div key={categoria.id} className="px-2 py-1.5">
+                        <label className="flex items-center gap-2 cursor-pointer">
+                          <Checkbox
+                            checked={selectedCategorias.includes(categoria.id)}
+                            onCheckedChange={(checked) => {
+                              setSelectedCategorias((prev) =>
+                                checked
+                                  ? [...prev, categoria.id]
+                                  : prev.filter((id) => id !== categoria.id)
+                              );
+                            }}
+                          />
+                          <span className="text-sm">{categoria.nombre}</span>
+                        </label>
+                      </div>
+                    ))}
+                  </ScrollArea>
+                </div>
+              </PopoverContent>
+            </Popover>
+          </div>
+
+          {/* Available Products List */}
+          <div className="border rounded-lg p-4">
+            <h2 className="font-semibold mb-4">Productos Disponibles</h2>
+            <ScrollArea className="h-[400px]">
+              {" "}
+              {/* Added ScrollArea */}
+              {loading ? (
+                <p className="text-muted-foreground text-center py-8">
+                  Cargando productos...
+                </p>
+              ) : filteredProductos.length === 0 ? (
+                <p className="text-muted-foreground text-center py-8">
+                  No se encontraron productos
+                </p>
+              ) : (
+                <div className="space-y-2">
+                  {filteredProductos.map((producto) => (
+                    <div
+                      key={producto.id}
+                      className="flex items-center justify-between p-3 border rounded-lg hover:bg-muted/50 cursor-pointer"
+                      onClick={() => agregarProducto(producto)}
+                    >
+                      <div>
+                        <p className="font-medium">{producto.nombre}</p>
+                        <p className="text-sm text-muted-foreground">
+                          {producto.codigo} •{" "}
+                          {categorias.find((c) => c.id === producto.categoriaId)
+                            ?.nombre || "Sin categoría"}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="font-medium">
+                          {formatCurrency(producto.precioVenta)}
+                        </span>
+                        <Plus className="h-4 w-4 text-primary" />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </ScrollArea>
+          </div>
+        </div>
+
+        {/* Right Column: Sale Summary */}
+        <div className="space-y-4">
+          <div className="border rounded-lg p-4">
+            <h2 className="font-semibold mb-4">Resumen de Venta</h2>
+
+            {/* Caja Selector */}
+            <div className="mb-4">
+              <label className="block text-sm font-medium mb-1">Caja</label>
+              <Select
+                value={selectedCajaId?.toString() ?? "no_caja"}
+                onValueChange={(value) =>
+                  setSelectedCajaId(value === "no_caja" ? null : Number(value))
+                }
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Seleccionar caja" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="no_caja">Sin caja</SelectItem>
+                  {cajas.map((caja) => (
+                    <SelectItem key={caja.id} value={caja.id.toString()}>
+                      {caja.nombre || `Caja #${caja.numero}`}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Client Selector */}
+            <div className="mb-4">
+              <label className="block text-sm font-medium mb-1">Cliente</label>
+              <Select
+                value={selectedCliente?.id?.toString() ?? "no_cliente"}
+                onValueChange={(value) => {
+                  if (value === "no_cliente") {
+                    setSelectedCliente(null);
+                    setSelectedName("");
+                  } else {
+                    const cliente = clientes.find(c => c.id === Number(value));
+                    if (cliente) {
+                      setSelectedCliente(cliente);
+                      setSelectedName(`${cliente.nombre} ${cliente.apellido || ''}`.trim());
+                    }
+                  }
+                }}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Seleccionar cliente" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="no_cliente">Sin cliente</SelectItem>
+                  {clientes.map((cliente) => (
+                    <SelectItem key={cliente.id} value={cliente.id.toString()}>
+                      {`${cliente.nombre || ""} ${cliente.apellido || ""
+                        }`.trim() || "Cliente sin nombre"}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Selected Products List */}
+            <div className="space-y-3 mb-4">
+              <h3 className="font-medium">Productos seleccionados</h3>
+              <ScrollArea className="h-[250px]">
+                {" "}
+                {/* Added ScrollArea */}
+                {productosSeleccionados.length === 0 ? (
+                  <p className="text-muted-foreground text-sm text-center py-4">
+                    No hay productos agregados
+                  </p>
+                ) : (
+                  <div className="space-y-2 pr-2">
+                    {" "}
+                    {/* Added padding for scrollbar */}
+                    {productosSeleccionados.map((item) => (
+                      <div
+                        key={item.producto.id}
+                        className="flex items-center justify-between p-2 border rounded-lg"
+                      >
+                        <div className="flex-1 mr-2">
+                          {" "}
+                          {/* Added margin */}
+                          <p className="font-medium text-sm truncate">
+                            {item.producto.nombre}
+                          </p>{" "}
+                          {/* Truncate */}
+                          <p className="text-xs text-muted-foreground">
+                            {" "}
+                            {/* Smaller text */}
+                            {formatCurrency(item.precio)} c/u
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-1">
+                          {" "}
+                          {/* Reduced gap */}
+                          <Button
+                            variant="outline"
+                            size="icon"
+                            className="h-6 w-6" // Smaller button
+                            onClick={() =>
+                              actualizarCantidad(
+                                item.producto.id,
+                                item.cantidad - 1
+                              )
+                            }
+                            disabled={item.cantidad <= 1}
+                          >
+                            <Minus className="h-3 w-3" />
+                          </Button>
+                          <span className="w-8 text-center text-sm font-medium">
+                            {item.cantidad}
+                          </span>{" "}
+                          {/* Adjusted font */}
+                          <Button
+                            variant="outline"
+                            size="icon"
+                            className="h-6 w-6" // Smaller button
+                            onClick={() =>
+                              actualizarCantidad(
+                                item.producto.id,
+                                item.cantidad + 1
+                              )
+                            }
+                            disabled={
+                              item.cantidad >= (item.producto.stockTotal || 0)
+                            }
+                          >
+                            <Plus className="h-3 w-3" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-6 w-6 text-red-500 hover:bg-red-100" // Smaller button
+                            onClick={() => eliminarProducto(item.producto.id)}
+                          >
+                            <X className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </ScrollArea>
+            </div>
+
+            {/* Totals Section */}
+            <div className="space-y-2 border-t pt-4">
+              <div className="flex justify-between">
+                <span>Total:</span>
+                <span className="font-bold">{formatCurrency(total)}</span>
+              </div>
+              <div className="flex justify-between items-center">
+                {" "}
+                {/* Align items */}
+                <span>Pago:</span>
+                <Input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={pago}
+                  onChange={(e) => setPago(Number(e.target.value))}
+                  className="w-32 text-right h-8" // Smaller input
+                />
+              </div>
+              <div className="flex justify-between font-medium">
+                <span>Cambio:</span>
+                <span
+                  className={cn(
+                    "font-bold",
+                    cambio < 0 ? "text-red-500" : "text-green-500"
+                  )}
+                >
+                  {formatCurrency(cambio)}
+                </span>
+              </div>
+            </div>
+
+            {/* Action Buttons */}
+            <div className="flex flex-col gap-2 mt-4">
+              <div className="flex gap-2">
+                <Button
+                  className="flex-1"
+                  variant="outline"
+                  onClick={handleConvertirAPendiente}
+                  disabled={loading || productosSeleccionados.length === 0}
+                >
+                  {loading ? "Guardando..." : "Guardar como pendiente"}
+                </Button>
+                <Button
+                  className="flex-1"
+                  onClick={guardarVenta}
+                  disabled={
+                    loading ||
+                    productosSeleccionados.length === 0 ||
+                    pago < total
+                  }
+                >
+                  {loading ? "Procesando..." : "Finalizar Venta"}
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
