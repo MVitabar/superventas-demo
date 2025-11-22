@@ -1,7 +1,6 @@
 import React, { ReactNode, useState, useEffect } from 'react';
 import { Sidebar } from './Sidebar';
 import { Navbar } from './Navbar';
-import { DemoBanner } from './DemoBanner';
 import { cn } from '@/lib/utils';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { Menu, X } from 'lucide-react';
@@ -61,9 +60,6 @@ export const Layout = ({ children, className }: LayoutProps) => {
         "flex-1 flex flex-col overflow-hidden",
         "transition-all duration-300 ease-in-out",
       )}>
-        {/* Demo Banner - only shown in demo mode */}
-        {import.meta.env.VITE_DEMO_MODE === 'true' && <DemoBanner />}
-
         <Navbar
           onMenuClick={toggleSidebar}
           showMenuButton={isMobile}
